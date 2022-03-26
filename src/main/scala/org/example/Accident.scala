@@ -1,13 +1,11 @@
 package org.example
 
 import org.apache.kafka.common.serialization.StringDeserializer
-import org.apache.spark.sql.functions.current_timestamp
+import org.apache.spark.sql.functions.{col, current_timestamp, when}
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.streaming.kafka010.{ConsumerStrategies, KafkaUtils, LocationStrategies}
 import org.apache.spark.streaming.{Minutes, StreamingContext}
-
-import scala.util.Try
 
 object Accident extends App {
 
@@ -20,8 +18,7 @@ object Accident extends App {
     .master("local[*]")
     .getOrCreate()
 
-  val sc = spark.sparkContext
-  val ssc = new StreamingContext(sc, Minutes(1))
+  val ssc = new StreamingContext(spark.sparkContext, Minutes(1))
   ssc.sparkContext.setLogLevel("ERROR")
 
   val kafkaParams = Map[String, Object](
@@ -42,65 +39,30 @@ object Accident extends App {
   )
 
   import spark.implicits._
-
   stream.foreachRDD {
     rdd =>
       val RDD_value = rdd.map(record => record.value)
-      val first_row = sc.parallelize(RDD_value.take(1))
-      val res = RDD_value.subtract(first_row)
+      val first_row = spark.sparkContext.parallelize(RDD_value.take(1))
+      var res = RDD_value.subtract(first_row)
 
-      val split_string = res.map(_.split(";(?=([^\"]*\"[^\"]*\")*[^\"]*$)", -1))
+      val split_string = res.map(_.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1))
+      var filter_data = split_string.filter(row => row.length == 29)
+      var data_row = filter_data.map(y => Row(y(0), y(1), y(2), y(3), y(4), y(5), y(6), y(7),
+            y(8), y(9), y(10), y(11), y(12), y(13), y(14), y(15), y(16), y(17), y(18),
+            y(19), y(20), y(21), y(22), y(23), y(24), y(25), y(26), y(27), y(28)))
 
-      val v = split_string.map(y => Row(
-        Try(y(0)) getOrElse("null"),
-        Try(y(1)) getOrElse("null"),
-        Try(y(2)) getOrElse("null"),
-        Try(y(3)) getOrElse("null"),
-        Try(y(4)) getOrElse("null"),
-        Try(y(5)) getOrElse("null"),
-        Try(y(6)) getOrElse("null"),
-        Try(y(7)) getOrElse("null"),
-        Try(y(8)) getOrElse("null"),
-        Try(y(9)) getOrElse("null"),
-        Try(y(10)) getOrElse("null"),
-        Try(y(11)) getOrElse("null"),
-        Try(y(12)) getOrElse("null"),
-        Try(y(13)) getOrElse("null"),
-        Try(y(14)) getOrElse("null"),
-        Try(y(15)) getOrElse("null"),
-        Try(y(16)) getOrElse("null"),
-        Try(y(17)) getOrElse("null"),
-        Try(y(18)) getOrElse("null"),
-        Try(y(19)) getOrElse("null"),
-        Try(y(20)) getOrElse("null"),
-        Try(y(21)) getOrElse("null"),
-        Try(y(22)) getOrElse("null"),
-        Try(y(23)) getOrElse("null"),
-        Try(y(24)) getOrElse("null"),
-        Try(y(25)) getOrElse("null"),
-        Try(y(26)) getOrElse("null"),
-        Try(y(27)) getOrElse("null"),
-        Try(y(28)) getOrElse("null")
-      ))
-
-      val header = RDD_value.first().split(";")
+      var header = RDD_value.first().split(",").map(_.replace(" ", "_"))
       val fields = header.map(fieldName => StructField(fieldName, StringType, nullable = true))
       val schemaAccident = StructType(fields)
-      var data = spark.sqlContext.createDataFrame(v, schemaAccident)
 
-      data = data.withColumnRenamed("NUMBER OF PERSONS INJURED", "NUMBER_OF_PERSONS_INJURED")
-        .withColumnRenamed("NUMBER OF PEDESTRIANS INJURED", "NUMBER_OF_PEDESTRIANS_INJURED")
-        .withColumnRenamed("NUMBER OF CYCLIST INJURED", "NUMBER_OF_CYCLIST_INJURED")
-        .withColumnRenamed("NUMBER OF MOTORIST INJURED", "NUMBER_OF_MOTORIST_INJURED")
-        .withColumnRenamed("ZIP CODE", "ZIP_CODE")
-
+      var data = spark.sqlContext.createDataFrame(data_row, schemaAccident)
 
       data.createOrReplaceTempView("Injured")
       val injured_q =
         """
           |select
           |current_timestamp()
-          |,sum(NUMBER_OF_PERSONS_INJURED)  as count_injured
+          |,sum(NUMBER_OF_PERSONS_INJURED) as count_injured
           |,sum(NUMBER_OF_PEDESTRIANS_INJURED) as count_pedestrians_injured
           |,sum(NUMBER_OF_CYCLIST_INJURED) as count_cyclist_injured
           |,sum(NUMBER_OF_MOTORIST_INJURED) as count_motorist_injured
@@ -108,9 +70,12 @@ object Accident extends App {
           | Injured;
           |""".stripMargin
 
-      val new_df = data.na.drop(Seq("ZIP_CODE", "BOROUGH"))
+      data = data.withColumn("ZIP_CODE", when(col("ZIP_CODE")
+        .equalTo(""), null).otherwise(col("ZIP_CODE")))
+        .withColumn("BOROUGH", when(col("BOROUGH")
+        .equalTo(""), null).otherwise(col("BOROUGH")))
+      var new_df = data.na.drop(Seq("ZIP_CODE", "BOROUGH"))
       new_df.createOrReplaceTempView("rating_zip_code")
-
       val rating_zip_code_q =
         """
           |select
@@ -128,34 +93,33 @@ object Accident extends App {
           |""".stripMargin
 
       new_df.createOrReplaceTempView("rating_borough")
-
       val rating_borough_q =
-        """
-          |select
-          |current_timestamp()
-          |,RANK() over (order by count(*) desc) as rank
-          |,BOROUGH
-          |,count(*) as count_crashes
-          |from
-          |rating_borough
-          |group by
-          |BOROUGH
-        order by
-          | count_crashes desc
+      """
+        |select
+        |current_timestamp()
+        |,RANK() over (order by count(*) desc) as rank
+        |,BOROUGH
+        |,count(*) as count_crashes
+        |from
+        |rating_borough
+        |group by
+        |BOROUGH
+         order by
+        | count_crashes desc
         limit 10;
           |""".stripMargin
 
       val injured_df = spark.sql(injured_q)
-      injured_df.show()
+      //injured_df.show()
       val rating_zip_code_df = spark.sql(rating_zip_code_q)
-      rating_zip_code_df.show()
+      //rating_zip_code_df.show()
       val rating_borough_df = spark.sql(rating_borough_q)
-      rating_borough_df.show()
+      //rating_borough_df.show()
 
       injured_df.write
         .mode("overwrite")
         .format("jdbc")
-        .option("url", "jdbc:postgresql://172.20.0.3:5432/db_accident")
+        .option("url", "jdbc:postgresql://172.20.0.2:5432/db_accident")
         .option("dbtable", "injured")
         .option("user", "postgres")
         .option("password", "7627")
@@ -164,7 +128,7 @@ object Accident extends App {
       rating_zip_code_df.write
         .mode("overwrite")
         .format("jdbc")
-        .option("url", "jdbc:postgresql://172.20.0.3:5432/db_accident")
+        .option("url", "jdbc:postgresql://172.20.0.2:5432/db_accident")
         .option("dbtable", "rating_zip_code")
         .option("user", "postgres")
         .option("password", "7627")
@@ -173,7 +137,7 @@ object Accident extends App {
       rating_borough_df.write
         .mode("overwrite")
         .format("jdbc")
-        .option("url", "jdbc:postgresql://172.20.0.3:5432/db_accident")
+        .option("url", "jdbc:postgresql://172.20.0.2:5432/db_accident")
         .option("dbtable", "rating_borough")
         .option("user", "postgres")
         .option("password", "7627")
@@ -181,7 +145,7 @@ object Accident extends App {
 
       // Write partition subfolder
       data = data.withColumn("current_timestamp", current_timestamp())
-      data.write.option("header", true)
+      data.write.option("header", "true")
         .partitionBy("current_timestamp")
         .mode("overwrite")
         .csv("/home/kini/Accident")
@@ -189,5 +153,4 @@ object Accident extends App {
 
   ssc.start()
   ssc.awaitTerminationOrTimeout(timeout = 2000000)
-
 }
