@@ -108,13 +108,13 @@ object Accident extends App {
           |""".stripMargin
 
       val injured_df = spark.sql(injured_q)
-      injured_df.show()
+      //injured_df.show()
       val rating_zip_code_df = spark.sql(rating_zip_code_q)
-      rating_zip_code_df.show()
+      //rating_zip_code_df.show()
       val rating_borough_df = spark.sql(rating_borough_q)
-      rating_borough_df.show()
+      //rating_borough_df.show()
 
-      /*injured_df.write
+      injured_df.write
         .mode("overwrite")
         .format("jdbc")
         .option("url", "jdbc:postgresql://172.20.0.2:5432/db_accident")
@@ -146,7 +146,7 @@ object Accident extends App {
       data.write.option("header", "true")
         .partitionBy("current_timestamp")
         .mode("overwrite")
-        .csv("/home/kini/Accident")*/
+        .csv("/home/kini/Accident")
   }
 
   ssc.start()
