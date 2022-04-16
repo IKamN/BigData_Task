@@ -47,9 +47,7 @@ object Accident extends App {
 
       val split_string = res.map(_.split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)", -1))
       var filter_data = split_string.filter(row => row.length == 29)
-      var data_row = filter_data.map(y => Row(y(0), y(1), y(2), y(3), y(4), y(5), y(6), y(7),
-            y(8), y(9), y(10), y(11), y(12), y(13), y(14), y(15), y(16), y(17), y(18),
-            y(19), y(20), y(21), y(22), y(23), y(24), y(25), y(26), y(27), y(28)))
+      var data_row = filter_data.map(y => Row(y:_*))
 
       var header = RDD_value.first().split(",").map(_.replace(" ", "_"))
       val fields = header.map(fieldName => StructField(fieldName, StringType, nullable = true))
@@ -110,13 +108,13 @@ object Accident extends App {
           |""".stripMargin
 
       val injured_df = spark.sql(injured_q)
-      //injured_df.show()
+      injured_df.show()
       val rating_zip_code_df = spark.sql(rating_zip_code_q)
-      //rating_zip_code_df.show()
+      rating_zip_code_df.show()
       val rating_borough_df = spark.sql(rating_borough_q)
-      //rating_borough_df.show()
+      rating_borough_df.show()
 
-      injured_df.write
+      /*injured_df.write
         .mode("overwrite")
         .format("jdbc")
         .option("url", "jdbc:postgresql://172.20.0.2:5432/db_accident")
@@ -148,7 +146,7 @@ object Accident extends App {
       data.write.option("header", "true")
         .partitionBy("current_timestamp")
         .mode("overwrite")
-        .csv("/home/kini/Accident")
+        .csv("/home/kini/Accident")*/
   }
 
   ssc.start()
